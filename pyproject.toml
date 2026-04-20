@@ -1,0 +1,19 @@
+[project]
+name = "kg-agent"
+version = "0.2.0"
+description = "ADK agent that extracts entities and relationships from text for a knowledge graph"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "python-dotenv>=1.0.0",
+    "google-adk>=0.1.0",
+    "litellm>=1.0.0",
+]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.0.0",
+    "ruff>=0.4.0",
+]
+
+# No [build-system] — script project, not an installable package.

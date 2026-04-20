@@ -1,0 +1,24 @@
+OpenAI was founded in December 2015 by Sam Altman, Greg Brockman, Ilya Sutskever, Elon Musk,
+and several other researchers. The company is headquartered in San Francisco, California.
+
+Sam Altman serves as the CEO of OpenAI. He previously led Y Combinator, the renowned startup
+accelerator based in Silicon Valley. Greg Brockman is the President and co-founder of OpenAI,
+having earlier worked at Stripe as its first CTO.
+
+In 2019, Microsoft made a significant investment of $1 billion in OpenAI, forging a strategic
+partnership. This was followed by a further multi-billion dollar investment in 2023. OpenAI
+subsequently integrated its GPT models into Microsoft Azure, Microsoft's cloud computing platform.
+
+OpenAI released GPT-4 in March 2023, a large language model that demonstrated remarkable
+reasoning capabilities. GPT-4 powers ChatGPT Plus, a subscription product launched by OpenAI.
+ChatGPT itself was released in November 2022 and quickly became the fastest-growing consumer
+application in history, reaching 100 million users in just two months.
+
+Anthropic, a competing AI safety company, was founded in 2021 by Dario Amodei and Daniela
+Amodei, both former OpenAI executives. Anthropic is headquartered in San Francisco and created
+the Claude family of AI assistants. Dario Amodei serves as CEO of Anthropic, while Daniela
+Amodei is the President.
+
+Google has invested heavily in Anthropic, committing up to $300 million in 2023, and later
+expanded its investment as part of a broader cloud partnership. Anthropic uses Google Cloud
+infrastructure for training its models.
