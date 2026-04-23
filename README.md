@@ -1,5 +1,21 @@
 #  source .venv/bin/activate
 
+```
+uv sync                                                                                                                   
+  uv run agent.py --file sample.txt 
+                                                                                                                  
+
+docker run -d --name falkordb -p 6379:6379 falkordb/falkordb:latest
+docker run -d --name falkordb -p 6379:6379 -p 3000:3000 falkordb/falkordb:latest
+```
+                                                                                                                            
+  That's it. Flags:                                                                                                         
+  - -d — run in background                                                                                                  
+  - --name falkordb — easy to reference later                                                                               
+  - -p 6379:6379 — exposes the Redis-compatible port your agent connects to                                                 
+                                       
+
+
 # Knowledge Graph Extraction Agent
 
 An ADK-style agent that reads a text file and extracts **entities** and **relationships** for insertion into a knowledge graph (Neo4j, AWS Neptune, or any property-graph database).

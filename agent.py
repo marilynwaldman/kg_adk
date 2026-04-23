@@ -13,7 +13,7 @@ Tools
 Setup
 -----
     cp .env.example .env       # set ANTHROPIC_API_KEY
-    uv sync --extra adk
+    uv sync 
     uv run agent.py --file sample.txt
     uv run agent.py --file sample.txt --output graph.json
 """
@@ -51,19 +51,22 @@ MODEL = LiteLlm(model="anthropic/claude-sonnet-4-20250514")
 SYSTEM_PROMPT = """\
 You are a Knowledge Graph Extraction Agent.
 
-Your goal is to build a complete knowledge-graph payload from a text file.
+Your goal is to build a complete knowledge-graph payload from a text file and
+persist it to FalkorDB.
 Work through these steps IN ORDER, calling one tool at a time:
 
-  1. read_file           — read the text file
-  2. extract_entities    — extract all named entities from the text
-  3. extract_relationships — extract all relationships between those entities
-  4. build_kg_payload    — assemble the final graph payload
+  1. read_file              — read the text file
+  2. extract_entities       — extract all named entities from the text
+  3. extract_relationships  — extract all relationships between those entities
+  4. build_kg_payload       — assemble the final graph payload
+  5. insert_into_falkordb   — insert the nodes and edges into FalkorDB
 
 Rules:
 - Pass the raw text content (not the file path) to extract_entities.
 - Pass the raw text AND the full entity list to extract_relationships.
 - Pass the entity list, relationship list, and source file path to build_kg_payload.
-- After build_kg_payload completes, your job is done. Stop calling tools.
+- Pass the 'nodes' and 'edges' lists from the build_kg_payload result to insert_into_falkordb.
+- After insert_into_falkordb completes, your job is done. Stop calling tools.
 """
 
 # ---------------------------------------------------------------------------
@@ -307,6 +310,105 @@ def build_kg_payload(
     }
 
 
+def insert_into_falkordb(
+    nodes: list,
+    edges: list,
+    graph_name: str = "",
+) -> dict[str, Any]:
+    """Insert knowledge-graph nodes and edges into FalkorDB.
+
+    Runs MERGE Cypher statements so the operation is idempotent — running it
+    twice on the same data will not create duplicate nodes or edges.
+
+    Args:
+        nodes:      List of node dicts produced by build_kg_payload.
+        edges:      List of edge dicts produced by build_kg_payload.
+        graph_name: FalkorDB graph name.  Defaults to the FALKORDB_GRAPH env var
+                    or 'knowledge_graph' if the var is not set.
+
+    Returns:
+        dict with keys: graph_name, nodes_inserted, edges_inserted.
+        On partial failure, an 'errors' key lists the failed statements.
+    """
+    try:
+        from falkordb import FalkorDB  # noqa: PLC0415
+    except ImportError:
+        return {"error": "falkordb package not installed. Run: uv add falkordb"}
+
+    host = os.environ.get("FALKORDB_HOST", "localhost")
+    port = int(os.environ.get("FALKORDB_PORT", "6379"))
+    password = os.environ.get("FALKORDB_PASSWORD") or None
+    if not graph_name:
+        graph_name = os.environ.get("FALKORDB_GRAPH", "knowledge_graph")
+
+    try:
+        db = FalkorDB(host=host, port=port, password=password)
+        graph = db.select_graph(graph_name)
+    except Exception as exc:
+        return {"error": f"FalkorDB connection failed: {exc}"}
+
+    nodes_inserted = 0
+    edges_inserted = 0
+    errors: list[str] = []
+
+    for n in nodes:
+        label = n.get("label", "Entity")
+        node_id = n.get("id", "")
+        props: dict[str, Any] = n.get("properties", {})
+
+        params: dict[str, Any] = {"_id": node_id}
+        set_parts: list[str] = []
+        for k, v in props.items():
+            param_key = f"prop_{k}"
+            params[param_key] = v
+            set_parts.append(f"n.{k} = ${param_key}")
+
+        cypher = f"MERGE (n:{label} {{id: $_id}})"
+        if set_parts:
+            cypher += f" SET {', '.join(set_parts)}"
+
+        try:
+            graph.query(cypher, params)
+            nodes_inserted += 1
+        except Exception as exc:
+            errors.append(f"Node '{node_id}': {exc}")
+
+    for edge in edges:
+        src = edge.get("source", "")
+        tgt = edge.get("target", "")
+        rel_type = edge.get("type", "RELATED_TO")
+        props = edge.get("properties", {})
+
+        params = {"_src": src, "_tgt": tgt}
+        set_parts = []
+        for k, v in props.items():
+            param_key = f"prop_{k}"
+            params[param_key] = v
+            set_parts.append(f"r.{k} = ${param_key}")
+
+        cypher = (
+            f"MATCH (a {{id: $_src}}), (b {{id: $_tgt}}) "
+            f"MERGE (a)-[r:{rel_type}]->(b)"
+        )
+        if set_parts:
+            cypher += f" SET {', '.join(set_parts)}"
+
+        try:
+            graph.query(cypher, params)
+            edges_inserted += 1
+        except Exception as exc:
+            errors.append(f"Edge '{src}'->>'{tgt}': {exc}")
+
+    result: dict[str, Any] = {
+        "graph_name": graph_name,
+        "nodes_inserted": nodes_inserted,
+        "edges_inserted": edges_inserted,
+    }
+    if errors:
+        result["errors"] = errors
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Agent + Runner
 # ---------------------------------------------------------------------------
@@ -322,6 +424,7 @@ def _build_agent() -> Agent:
             FunctionTool(extract_entities),
             FunctionTool(extract_relationships),
             FunctionTool(build_kg_payload),
+            FunctionTool(insert_into_falkordb),
         ],
     )
 
@@ -348,10 +451,12 @@ async def _run_async(file_path: str) -> dict[str, Any]:
         # ADK emits events for every tool call and response.
         # Intercept the build_kg_payload tool result directly from the event
         # stream — never rely on the agent's final text response.
+        # print("event", event.)
         if hasattr(event, "content") and event.content:
             for part in event.content.parts or []:
                 if hasattr(part, "function_response") and part.function_response:
                     fn = part.function_response
+                    print("fn", fn.name)
                     if fn.name == "build_kg_payload":
                         response_data = fn.response
                         # ADK wraps tool return values in {"result": ...}
@@ -363,6 +468,20 @@ async def _run_async(file_path: str) -> dict[str, Any]:
                                 f"{payload['metadata']['node_count']} nodes, "
                                 f"{payload['metadata']['edge_count']} edges"
                             )
+                    elif fn.name == "insert_into_falkordb":
+                        response_data = fn.response
+                        result = response_data.get("result", response_data)
+                        if isinstance(result, dict) and "error" in result:
+                            print(f"  ⚠️   FalkorDB error: {result['error']}")
+                        elif isinstance(result, dict):
+                            print(
+                                f"  ✅  FalkorDB '{result.get('graph_name')}': "
+                                f"{result.get('nodes_inserted')} nodes, "
+                                f"{result.get('edges_inserted')} edges inserted"
+                            )
+                            if result.get("errors"):
+                                for err in result["errors"]:
+                                    print(f"       ⚠️  {err}")
 
     return captured
 

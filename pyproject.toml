@@ -8,6 +8,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "google-adk>=0.1.0",
     "litellm>=1.0.0",
+    "falkordb>=1.0.0",
 ]
 
 [tool.uv]
